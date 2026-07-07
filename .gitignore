@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+meu_banco_vetorial/
+.env
+.DS_Store
