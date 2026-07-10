@@ -1,80 +1,58 @@
 # 🎫 Portfolio-Ticket — Triagem Inteligente de Chamados
 
-Microsserviço de IA que recebe chamados de suporte, busca contexto relevante numa base de conhecimento interna e sugere respostas automaticamente. Projetado para funcionar como backend de um sistema maior (ex: uma aplicação Spring Boot que gerencia os tickets).
+Microsserviço de IA que recebe chamados de suporte, busca contexto relevante numa base de conhecimento interna usando RAG e sugere respostas de forma totalmente autônoma. Projetado para funcionar integrado a sistemas de helpdesk corporativos.
 
 ---
 
 ## 📋 Índice
 
-- [Motivação](#-motivação)
-- [Por que IA para triagem?](#-por-que-ia-para-triagem)
-- [Arquitetura](#-arquitetura)
-- [Estrutura do Projeto](#-estrutura-do-projeto)
+- [Visão Geral](#-visão-geral)
+- [Estrutura do Repositório](#-estrutura-do-repositório)
 - [Endpoints da API](#-endpoints-da-api)
-- [Como Rodar](#-como-rodar)
-- [Variáveis de Ambiente](#-variáveis-de-ambiente)
+- [Como Executar](#-como-executar)
+- [Documentação Detalhada](#-documentação-detalhada)
 
 ---
 
-## 💡 Motivação
+## 💡 Visão Geral
 
-Em operações de suporte real, a maior parte do tempo de um analista de nível 1 é gasta lendo o chamado, buscando a resposta na documentação interna e reformulando essa resposta para o cliente. Isso é repetitivo, lento e sujeito a inconsistências entre atendentes.
+Este projeto automatiza a triagem e resolução de tickets de suporte combinando **Busca Híbrida Semântica/Lexical (RAG)** com **Agentes Autônomos (LangGraph)** que decidem quando consultar documentos internos ou acionar ferramentas do sistema (IAM/Active Directory, ITSM e CRM) de forma assíncrona.
 
-A proposta deste projeto é automatizar exatamente esse fluxo:
-
-1. O cliente abre um chamado com texto livre.
-2. A IA busca o trecho mais relevante da base de conhecimento da empresa.
-3. A IA formula uma resposta baseada **exclusivamente** nesse contexto (sem inventar).
-4. O sistema devolve a sugestão, que pode ser enviada ao cliente ou revisada por um humano.
-
-O objetivo **não é substituir o atendente**, mas eliminar o trabalho mecânico de busca e redação, permitindo que o humano foque em casos que realmente exigem julgamento.
-
----
-
-## 🤔 Por que IA para triagem?
-
-Em vez de usar keyword matching ou árvores de decisão (que quebram com texto livre e linguagem informal), este projeto combina **busca vetorial semântica (RAG)** com uma **LLM** para encontrar a informação certa e reformulá-la numa resposta natural para o cliente.
-
-> Para a análise completa de trade-offs — incluindo por que não usar só a busca vetorial sem LLM, alternativas determinísticas consideradas e custos assumidos — veja o [ARCHITECTURE.md](ARCHITECTURE.md).
-
----
-
-## 🏗 Arquitetura
-
-```
-┌─────────────────┐       HTTP        ┌──────────────────────────────┐
-│  Spring Boot    │ ──────────────▶   │  FastAPI (este serviço)      │
-│  (Backend)      │  POST /tickets    │                              │
-└─────────────────┘                   │  main.py (API)               │
-                                      │    ├── graph_agent.py        │
-                                      │    │    └── LangGraph         │
-                                      │    │         ├─ Bibliotecário │ ─▶ ChromaDB (busca vetorial)
-                                      │    │         └─ Atendente     │ ─▶ LLM (Minimax-M3)
-                                      │    └── rag_service.py        │
-                                      │         └── ChromaDB + Embeddings
-                                      └──────────────────────────────┘
+```mermaid
+graph TD
+    User[Usuário / Sistema de Ticket] -->|POST /tickets/process| API[FastAPI App]
+    API -->|Orquestração| Agent[LangGraph Agent]
+    Agent -->|RAG Query| Chroma[(ChromaDB + BM25)]
+    Agent -->|Resoluções| Tools[Enterprise Mock Tools]
+    Tools -->|AD / CRM / ITSM Mocks| ExternalSystem[Sistemas Corporativos]
 ```
 
-> Para detalhes sobre a stack, fluxo do LangGraph e separação de responsabilidades, veja o [ARCHITECTURE.md](ARCHITECTURE.md).
-
 ---
 
-## 📁 Estrutura do Projeto
+## 📁 Estrutura do Repositório
 
-```
+```text
 Portfolio-Ticket/
-├── main.py                  # API FastAPI — endpoints HTTP
-├── graph_agent.py           # Orquestração LangGraph — fluxo dos agentes
-├── rag_service.py           # Serviço de RAG — ChromaDB + embeddings
-├── rag_knowledge_base.md    # Documentação sobre o design da base de conhecimento
-├── requirements.txt         # Dependências Python
-├── ARCHITECTURE.md          # Decisões arquiteturais e trade-offs
+├── app/
+│   ├── main.py                  # API FastAPI (Rotas HTTP e setup da app)
+│   ├── core/
+│   │   └── observability.py     # Inicialização de Rastreamento (OTel), Logs (Loki) e Métricas (Prometheus)
+│   ├── services/
+│   │   └── rag_service.py       # Busca Híbrida RAG (ChromaDB + BM25 Okapi)
+│   └── agents/
+│       ├── tools.py             # Ferramentas corporativas mockadas (AD, CRM, ITSM)
+│       ├── graph_agent.py       # Agente Autônomo Principal (LangGraph)
+│       └── agentscope_agent.py  # Agente Alternativo (AgentScope 2.0)
 ├── data/
-│   └── policies/            # Documentos de política da empresa (mock)
-│       ├── acesso_conta.md
-│       ├── politica_reembolso.md
-│       └── politica_sla.md
-└── meu_banco_vetorial/      # Dados persistidos do ChromaDB (gerado automaticamente)
+│   └── policies/                # Políticas de suporte indexadas pelo RAG
+├── docs/                        # Documentação do projeto (Arquitetura, Observabilidade, Qualidade)
+│   ├── architecture.md          # Decisões de arquitetura e trade-offs
+│   ├── observability.md         # Rastreamento de traces com Grafana + Tempo + Loki
+│   ├── rag_knowledge_base.md    # Estrutura do banco vetorial RAG
+│   └── evaluation.md            # Avaliação de qualidade do RAG
+├── docker-compose.yml           # Stack Grafana (LGTM-lite local)
+├── requirements.txt             # Dependências Python
+└── README.md                    # Este arquivo (Visão Geral e Setup)
 ```
 
 ---
@@ -84,12 +62,12 @@ Portfolio-Ticket/
 | Método | Rota | Descrição |
 |---|---|---|
 | `GET` | `/` | Health check |
-| `POST` | `/api/v1/tickets/process` | Processa um chamado e retorna a sugestão da IA |
+| `POST` | `/api/v1/tickets/process` | Processa chamado e retorna a resposta do Agente |
 | `POST` | `/api/v1/documents` | Upload de arquivo `.md` para indexar no RAG |
-| `GET` | `/api/v1/documents` | Lista todos os documentos indexados |
-| `DELETE` | `/api/v1/documents/{doc_id}` | Remove um documento do RAG pelo ID |
+| `GET` | `/api/v1/documents` | Lista documentos indexados no RAG |
+| `DELETE` | `/api/v1/documents/{doc_id}` | Remove documento do RAG pelo ID |
 
-### Exemplos
+### Exemplos rápidos de uso:
 
 **Processar um ticket:**
 ```bash
@@ -98,47 +76,45 @@ curl -X POST http://localhost:8000/api/v1/tickets/process \
   -d '{"ticket_id": "TK-001", "texto": "Minha conta foi bloqueada depois de errar a senha"}'
 ```
 
-**Upload de documento para o RAG:**
-```bash
-curl -X POST http://localhost:8000/api/v1/documents \
-  -F "file=@data/policies/acesso_conta.md"
-```
-
-**Listar documentos indexados:**
-```bash
-curl http://localhost:8000/api/v1/documents
-```
-
-**Remover documento:**
-```bash
-curl -X DELETE http://localhost:8000/api/v1/documents/acesso_conta.md
-```
-
 ---
 
-## 🚀 Como Rodar
+## 🚀 Como Executar
 
+### 1. Requisitos
+* Python 3.10+
+* Docker e Docker Compose (para visualização de telemetria)
+
+### 2. Passo a Passo
 ```bash
-# 1. Criar e ativar o ambiente virtual
+# Criar e ativar o ambiente virtual
 python3 -m venv .venv
 source .venv/bin/activate
 
-# 2. Instalar dependências
+# Instalar dependências
 pip install -r requirements.txt
 
-# 3. Configurar a chave da API (ver seção abaixo)
+# Configurar as chaves e variáveis de ambiente
 export MINIMAX_API_KEY="sua-chave-aqui"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317" # Caso queira Tracing no Docker
 
-# 4. Iniciar o servidor
-uvicorn main:app --reload
+# Iniciar o servidor
+uvicorn app.main:app --reload
 ```
+A API estará disponível em `http://localhost:8000`. Acesse a documentação interativa em `http://localhost:8000/docs`.
 
-A documentação interativa (Swagger) estará disponível em `http://localhost:8000/docs`.
+### 3. Subir Stack de Observabilidade (Opcional)
+Se quiser acompanhar os traces das chamadas de ferramentas e logs detalhados:
+```bash
+docker compose up -d
+```
+Acesse o Grafana em `http://localhost:3000` (User/Password: `admin` / `admin`).
 
 ---
 
-## 🔑 Variáveis de Ambiente
+## 📖 Documentação Detalhada
 
-| Variável | Obrigatória | Descrição |
-|---|---|---|
-| `MINIMAX_API_KEY` | Sim | Chave de API do Minimax para chamadas à LLM |
+Para ir a fundo no funcionamento técnico deste projeto, consulte:
+1. **[Decisões de Arquitetura e Trade-offs](docs/architecture.md)**: Justificativa de uso do LangGraph vs AgentScope, fluxo de decisão autônoma do agente e design da busca híbrida.
+2. **[Guia de Observabilidade Híbrida](docs/observability.md)**: Como funciona o rastreamento OTel com Grafana Tempo, Loki e Prometheus no localhost + Docker.
+3. **[Design do RAG & Vetores](docs/rag_knowledge_base.md)**: Funcionamento dos embeddings e o processo de busca híbrida com RRF.
+4. **[Avaliação de Qualidade do RAG](docs/evaluation.md)**: Análise de revocação e eficácia das respostas baseadas nas políticas.

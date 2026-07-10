@@ -1,8 +1,9 @@
+import os
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
-from graph_agent import processar_ticket
-from rag_service import adicionar_documento, remover_documento, listar_documentos
+from app.services.rag_service import adicionar_documento, remover_documento, listar_documentos
+from app.core.observability import setup_observability
 
 # Instancia o servidor FastAPI
 app = FastAPI(
@@ -11,10 +12,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Configura observabilidade (Prometheus, OpenTelemetry e Loki)
+setup_observability(app)
+
 # Modelos Pydantic para validar os dados que entram e saem da API
 class TicketRequest(BaseModel):
     ticket_id: str
     texto: str
+    motor: Optional[str] = "langgraph"
 
 class TicketResponse(BaseModel):
     ticket_id: str
@@ -27,13 +32,17 @@ def root():
     return {"message": "API de IA operante. Acesse /docs para ver os endpoints."}
 
 @app.post("/api/v1/tickets/process", response_model=TicketResponse)
-def process_ticket_endpoint(request: TicketRequest):
+async def process_ticket_endpoint(request: TicketRequest):
     """
-    Recebe um chamado, passa pelo fluxo de agentes LangGraph e retorna a resposta.
+    Recebe um chamado, passa pelo fluxo de agentes escolhido (LangGraph ou AgentScope) e retorna a resposta.
     """
     try:
-        # Chama a função que criamos no graph_agent.py
-        resposta_final = processar_ticket(request.texto)
+        if request.motor == "agentscope":
+            from app.agents.agentscope_agent import processar_ticket as processar_agentscope
+            resposta_final = await processar_agentscope(request.ticket_id, request.texto)
+        else:
+            from app.agents.graph_agent import processar_ticket as processar_langgraph
+            resposta_final = await processar_langgraph(request.ticket_id, request.texto)
         
         return TicketResponse(
             ticket_id=request.ticket_id,
