@@ -16,6 +16,20 @@ Antes mesmo do cliente abrir um chamado, precisamos ter a nossa base pronta. O f
 
 ---
 
+## 1.1 A Estratégia de Busca Híbrida (Hybrid Search)
+
+A busca semântica tradicional (por vetores) entende sinônimos e contexto, o que é ótimo para a maioria das perguntas. Porém, ela **falha em encontrar palavras-chave específicas**, como siglas, IDs de erro, ou jargões corporativos (ex: "plano enterprise", "Erro XPT-99"). Nessas horas, o modelo vetorial pode "diluir" o peso da palavra exata no contexto geral da frase, trazendo documentos errados.
+
+Para evitar alucinações nesses cenários críticos e trazer resultados de nível de produção, adotamos a **Busca Híbrida**:
+- **Busca Semântica (ChromaDB + SentenceTransformers):** Transforma frases em vetores para procurar pelo *significado* geral da pergunta.
+- **Busca Lexical (BM25):** Atua como um "Control+F Inteligente", focando em "Match Exato". Ele ignora palavras muito comuns e dá uma pontuação altíssima para documentos que contenham palavras-chave raras ou exatas solicitadas pelo usuário.
+
+### Como unimos os resultados? (Reciprocal Rank Fusion - RRF)
+Como a Busca Semântica e a Busca Lexical avaliam os textos de formas completamente diferentes, usamos o algoritmo **RRF** para combinar os dois mundos. 
+O RRF não tenta cruzar as "notas" dos algoritmos; ele avalia apenas o **ranking (a posição)** em que cada documento ficou nas duas listas. Através de uma fórmula de fusão matemática, ele gera uma lista final unificada, jogando para o topo o documento perfeito que pontuou bem em ambas as estratégias.
+
+---
+
 ## 2. Mock de Dados (Textos para a Base)
 
 Aqui estão três exemplos de políticas que você pode salvar como arquivos `.txt` ou `.md` na sua máquina para alimentar o Vector Store depois. Vamos usar um cenário de uma **empresa de Software/SaaS**.

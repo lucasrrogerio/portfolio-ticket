@@ -1,6 +1,6 @@
 # 🏗 Decisões de Arquitetura
 
-Este documento descreve as decisões técnicas do projeto, seus trade-offs e as alternativas consideradas. Se você quer saber **como rodar**, veja o [README.md](README.md). Aqui explicamos o **porquê**.
+Este documento descreve as decisões técnicas do projeto,  trade-offs e alternativas consideradas.
 
 ---
 
@@ -8,7 +8,8 @@ Este documento descreve as decisões técnicas do projeto, seus trade-offs e as 
 
 - [Por que IA e não regras determinísticas?](#-por-que-ia-e-não-regras-determinísticas)
 - [Por que não usar só a busca vetorial, sem a LLM?](#-por-que-não-usar-só-a-busca-vetorial-sem-a-llm)
-- [Trade-offs assumidos](#trade-offs-assumidos)
+- [Por que usar busca híbrida (Vetorial + BM25)?](#-por-que-busca-híbrida-vetorial--bm25)
+- [Trade-offs assumidos](#️-trade-offs-assumidos)
 - [Visão geral da arquitetura](#-visão-geral-da-arquitetura)
 - [Fluxo do LangGraph](#fluxo-do-langgraph)
 - [Stack tecnológica e justificativas](#-stack-tecnológica-e-justificativas)
@@ -18,22 +19,21 @@ Este documento descreve as decisões técnicas do projeto, seus trade-offs e as 
 
 ## 🤔 Por que IA e não regras determinísticas?
 
-Essa é a pergunta certa a se fazer. Antes de escolher IA generativa, vale considerar as alternativas mais simples:
 
 ### Alternativas determinísticas e seus limites
 
 | Abordagem | Como funciona | Onde falha |
 |---|---|---|
-| **Keyword matching** | Busca por palavras-chave ("reembolso", "senha", "SLA") e retorna a resposta mapeada. | O cliente escreve "quero meu dinheiro de volta" — nenhuma keyword bate. Sinônimos, erros de digitação e linguagem informal quebram o sistema. |
-| **Árvore de decisão / Fluxo fixo** | Chatbot com menus ("Selecione: 1-Financeiro, 2-Técnico, 3-Outro"). | Funciona para fluxos simples, mas não lida com texto livre. O cliente precisa se encaixar nas opções — e quando o problema cruza duas categorias, o fluxo trava. |
-| **Regex + NLP clássico** | Classificadores treinados (ex: Naive Bayes, SVM) para categorizar o ticket e retornar templates. | Exige dataset de treinamento rotulado, retreino constante quando surgem novos tipos de chamado, e as respostas são templates rígidos (não se adaptam ao tom/contexto da pergunta). |
+| **Keyword matching** | Busca por palavras-chave ("reembolso", "senha", "SLA") e retorna a resposta mapeada. | Sinônimos, erros de digitação e linguagem informal quebram o sistema. Ex: O cliente escreve "quero meu dinheiro de volta" e nenhuma keyword bate. |
+| **Árvore de decisão / Fluxo fixo** | Chatbot com menus ("Selecione: 1-Financeiro, 2-Técnico, 3-Outro"). | Funciona para fluxos simples, mas não lida com texto livre. Quando o cliente não acha a opção desejada, o fluxo trava. |
+| **Regex + NLP clássico** | Classificadores treinados (ex: Naive Bayes, SVM) para categorizar o ticket e retornar templates. | Exige dataset de treinamento rotulado, retreino constante quando surgem novos tipos de chamado, e as respostas são templates rígidos que não se adaptam ao tom/contexto do cliente. |
 
 ### Onde a IA generativa + RAG se justifica
 
-A combinação de **busca vetorial (RAG)** + **LLM** resolve exatamente os pontos fracos acima:
+A combinação de **busca vetorial (RAG)** + **LLM** resolve os pontos fracos acima:
 
-- **Busca semântica**: "quero meu dinheiro de volta" é matematicamente similar a "política de reembolso" no espaço vetorial, mesmo sem compartilhar nenhuma palavra. Isso elimina a fragilidade do keyword matching.
-- **Resposta contextualizada**: A LLM não devolve um template fixo — ela formula uma resposta natural, adaptada ao tom e aos detalhes específicos da pergunta do cliente.
+- **Busca semântica**: "quero meu dinheiro de volta" é matematicamente similar a "política de reembolso" no espaço vetorial, eliminando a fragilidade do keyword matching.
+- **Resposta contextualizada**: A LLM não devolve um template fixo. Ela formula uma resposta natural, adaptada ao tom e aos detalhes específicos da pergunta do cliente.
 - **Zero retreino**: Novos documentos de política são adicionados via upload (endpoint POST). Não é necessário retreinar nenhum modelo, basta indexar o novo `.md`.
 
 ---
@@ -52,22 +52,32 @@ Funciona. O cliente recebe a informação correta, com custo zero de LLM e respo
 **Mesmo cenário — busca vetorial + LLM:**
 > Resposta reformulada: *"Entendo a urgência! Sua conta foi bloqueada por segurança após as tentativas incorretas. Ela será desbloqueada automaticamente em 30 minutos. Enquanto isso, recomendo redefinir sua senha clicando em 'Esqueci minha senha' na tela de login assim que desbloquear."*
 
-A LLM agrega em três pontos: **tom de voz** (reconheceu a urgência), **síntese** (combinou bloqueio + redefinição de senha de trechos diferentes) e **adaptação** (resposta sob medida para a pergunta, não um copiar-colar do doc).
+Mas a LLM neste projeto vai **muito além de apenas reescrever textos**. O verdadeiro motivo de não usarmos apenas uma busca vetorial é a capacidade de criar um **Agente Autônomo**.
 
-**Quando cada abordagem faz sentido:**
+Ao acoplar a LLM a ferramentas e integrações externas (através de Tool Calling ou padrões como o MCP - Model Context Protocol), transformamos um sistema estático de *Perguntas e Respostas* em um sistema ativo de *Resolução de Problemas*:
 
-| Cenário | Melhor abordagem |
-|---|---|
-| Docs já escritos para o cliente (FAQ público) | Só vetorial — a LLM é custo desnecessário |
-| Docs internos/técnicos que precisam de reformulação | Vetorial + LLM |
-| Volume altíssimo e orçamento limitado | Só vetorial, com LLM apenas para casos de baixa confiança |
-| Experiência premium de atendimento | Vetorial + LLM |
+1. **Compreensão de Intenção e Contexto:** A LLM consegue ler o histórico do ticket, entender o tom do usuário e deduzir se a situação exige ação imediata ou escalonamento, coisa que a busca vetorial sozinha jamais faria.
+2. **Execução Ativa:** O agente não precisa apenas responder "você precisa acessar o sistema e redefinir a senha". Tendo acesso às ferramentas certas, a IA entende a política via RAG, bate na API do sistema para verificar o status do usuário e, de forma autônoma, toma a ação de disparar o e-mail de redefinição **sem nenhuma intervenção humana**.
+3. **Autonomia de Fluxo:** Diferente de um chatbot engessado, a LLM atua orquestrando o fluxo: "Primeiro consulto as políticas da empresa. Depois chamo a API de billing. Se a fatura estiver atrasada de fato, executo a ação de estorno e aviso o cliente".
 
-Neste projeto, os documentos em `data/policies/` são escritos em tom interno/técnico, justificando a reformulação pela LLM. Mas a arquitetura **já suporta o cenário sem LLM** — bastaria o nó `bibliotecario` retornar o contexto direto como resposta final, pulando o nó `atendente` no grafo.
+Em resumo: A busca híbrida e o RAG são **a memória** do sistema. O LangGraph e a LLM formam **o cérebro e as mãos**, garantindo uma automação inteligente e resolução ponta a ponta para o cliente.
 
 ---
 
-## Trade-offs assumidos
+## 🔀 Por que Busca Híbrida (Vetorial + BM25)?
+
+A busca semântica (vetorial) é excelente para entender o contexto. Se o usuário digitar "quero cancelar", ela encontra o documento de "reembolso". Porém, **ela falha em buscas exatas**.
+
+Se um usuário digita o jargão *"vantagens do plano Enterprise"* ou *"Erro XPT-99"*, a busca semântica pode diluir o peso dessas palavras raras e focar apenas no conceito geral da frase, trazendo documentos incorretos. 
+
+Para resolver esse gap (muito comum em RAGs de produção), adotamos a **Busca Híbrida**:
+- **Busca Semântica:** Para entender sinônimos e intenções.
+- **Busca Lexical (BM25):** Para "cravar" palavras-chave exatas e raras.
+- **RRF (Reciprocal Rank Fusion):** Um algoritmo que funde os rankings das duas buscas para garantir que o melhor documento de ambos os mundos suba para o topo.
+
+---
+
+## ⚖️ Trade-offs assumidos
 
 > Nenhuma decisão técnica é de graça. Aqui estão os custos conscientes:
 
@@ -88,26 +98,37 @@ Neste projeto, os documentos em `data/policies/` são escritos em tom interno/t�
 └─────────────────┘                   │  main.py (API)               │
                                       │    ├── graph_agent.py        │
                                       │    │    └── LangGraph         │
-                                      │    │         ├─ Bibliotecário │ ─▶ ChromaDB (busca vetorial)
-                                      │    │         └─ Atendente     │ ─▶ LLM (Minimax-M3)
+                                      │    │         ├─ Analista      │ ─▶ Otimiza Intenção
+                                      │    │         ├─ Bibliotecário │ ─▶ ChromaDB + BM25
+                                      │    │         ├─ Atendente     │ ─▶ LLM (Minimax)
+                                      │    │         └─ Tools         │ ─▶ APIs / Mocks
                                       │    └── rag_service.py        │
                                       │         └── ChromaDB + Embeddings
                                       └──────────────────────────────┘
 ```
 
-### Fluxo do LangGraph
+### Fluxo do LangGraph (Orquestração de Agentes)
 
-O fluxo é intencionalmente simples (dois nós sequenciais):
+O fluxo reflete uma arquitetura real de **Agente Autônomo** com tomada de decisão (Tool Calling) e rotas condicionais:
 
+```text
+[START] ──▶ [Analista] ──▶ [Bibliotecário] ──▶ [Atendente] ──(Fim)──▶ [END]
+                 │                │                 │  ▲
+                 ▼                ▼                 ▼  │
+             Otimiza a      Busca Híbrida     Decide se usa
+             pergunta       (Chroma + BM25)   ferramentas
+                                                    │  │
+                                            (Usa)   ▼  │ (Retorna Resultado)
+                                                 [Tools]
 ```
-[START] ──▶ [Bibliotecário] ──▶ [Atendente] ──▶ [END]
-               │                     │
-               ▼                     ▼
-         Busca semântica        Gera resposta
-         no ChromaDB            via LLM
-```
 
-**Por que LangGraph para um fluxo tão simples?** Porque a arquitetura foi pensada para crescer. Adicionar um nó de classificação, um nó de validação de confiança ou um loop de refinamento é trivial — basta adicionar nós e arestas ao grafo, sem reescrever a lógica existente.
+**Como o ciclo funciona:**
+1. **Analista:** Recebe o texto livre do cliente, analisa a intenção e extrai as palavras-chave vitais (gerando um JSON estruturado).
+2. **Bibliotecário:** Usa esse JSON para realizar a Busca Híbrida e resgatar as políticas corretas do banco vetorial e do índice.
+3. **Atendente (O Cérebro):** Recebe a política e a pergunta. Aqui acontece a mágica do *Tool Calling*. Se a política exigir uma ação no sistema (ex: "destravar conta"), o Atendente decide interromper a resposta e chamar a ferramenta correspondente.
+4. **Tools Node (Ação):** Um nó condicional. Se o Atendente pedir o uso de ferramentas, o grafo desvia para este nó, executa a função Python (API mockada em `tools.py`) e devolve o resultado para a LLM. O ciclo se repete até o Atendente dar a resposta final e seguir para o `END`.
+
+Essa estrutura com loop condicional prova que não estamos apenas gerando texto, mas criando um fluxo de raciocínio lógico e execução ativa (baseado no padrão `ReAct`), totalmente orquestrado pelo LangGraph.
 
 ---
 
@@ -116,8 +137,8 @@ O fluxo é intencionalmente simples (dois nós sequenciais):
 | Tecnologia | Papel | Por que essa e não outra? |
 |---|---|---|
 | **FastAPI** | API REST | Async nativo, documentação automática (Swagger), validação via Pydantic. Ideal para microsserviços Python. |
-| **LangGraph** | Orquestração de agentes | Permite modelar o fluxo como um grafo de estados, facilitando a adição de novos nós (classificação, validação, etc.) sem reescrever código. |
-| **ChromaDB** | Banco vetorial | Roda embarcado (sem infra extra), persistência em disco, API simples. Suficiente para a escala deste projeto. Em produção, migraria para Qdrant ou Pinecone. |
+| **LangGraph / AgentScope** | Orquestração de agentes | Iniciei com o LangGraph pois ele modela o fluxo como um grafo de estados, facilitando integrações. Porém, também estruturei testes com o **AgentScope** por ser um framework muito promissor para orquestração de múltiplos agentes com maior autonomia. Manter os dois no radar (e no código) demonstra versatilidade e pensamento em escalabilidade futura. |
+| **ChromaDB + BM25** | Banco e Busca | ChromaDB para persistência e vetores locais (ideal para portfólio), complementado com algoritmo BM25 em memória para viabilizar a arquitetura de **Busca Híbrida**. |
 | **SentenceTransformers** | Geração de embeddings | Modelo multilíngue (`paraphrase-multilingual-MiniLM-L12-v2`) que roda localmente, sem custo por chamada. Essencial para suporte em português. |
 | **Minimax-M3 (via OpenAI SDK)** | LLM para geração de texto | Compatível com o SDK da OpenAI (troca de provider sem alterar código), custo acessível, e desempenho adequado para tarefas de suporte N1. |
 
