@@ -93,17 +93,15 @@ Para resolver esse gap (muito comum em RAGs de produção), adotamos a **Busca H
 
 ```
 ┌─────────────────┐       HTTP        ┌──────────────────────────────┐
-│  Spring Boot    │ ──────────────▶   │  FastAPI (este serviço)      │
+│  Spring Boot    │ ──────────────▶   │  FastAPI (Presentation)      │
 │  (Backend)      │  POST /tickets    │                              │
-└─────────────────┘                   │  main.py (API)               │
-                                      │    ├── graph_agent.py        │
-                                      │    │    └── LangGraph         │
-                                      │    │         ├─ Analista      │ ─▶ Otimiza Intenção
-                                      │    │         ├─ Bibliotecário │ ─▶ ChromaDB + BM25
-                                      │    │         ├─ Atendente     │ ─▶ LLM (Minimax)
-                                      │    │         └─ Tools         │ ─▶ APIs / Mocks
-                                      │    └── rag_service.py        │
-                                      │         └── ChromaDB + Embeddings
+└─────────────────┘                   │  routes.py (Rotas/API)       │
+                                      │    ├── use_cases/            │
+                                      │    │    └── ticket_use_cases │
+                                      │    │         ├─ AgentFactory │ ─▶ Resolve DI
+                                      │    │         └─ AgentService │ ─▶ LangGraph/AgentScope
+                                      │    └── infrastructure/       │
+                                      │         └── chroma_service   │ ─▶ ChromaDB + BM25
                                       └──────────────────────────────┘
 ```
 
@@ -148,13 +146,15 @@ Essa estrutura com loop condicional prova que não estamos apenas gerando texto,
 
 ```
 Portfolio-Ticket/
-├── main.py            → Camada HTTP (entrada/saída)
-├── graph_agent.py     → Orquestração (fluxo dos agentes)
-└── rag_service.py     → Dados (ChromaDB + embeddings)
+├── app/presentation/  → Camada HTTP (Rotas e Entradas/Saídas via FastAPI)
+├── app/use_cases/     → Regras de negócio da aplicação
+├── app/domain/        → Interfaces abstratas (DIP - Princípio de Inversão de Dependência)
+└── app/infrastructure/→ Frameworks, agentes externos (LangGraph) e bancos (ChromaDB)
 ```
 
-- **`main.py`** — Camada HTTP. Não contém lógica de negócio; apenas recebe requests, chama os serviços e devolve responses.
-- **`graph_agent.py`** — Orquestração. Define *como* os agentes interagem (ordem, fluxo, estado). Não sabe como o banco vetorial funciona internamente.
-- **`rag_service.py`** — Dados. Encapsula toda interação com o ChromaDB e o modelo de embeddings. Pode ser substituído por outro provider (ex: Pinecone) sem afetar o restante.
-
-Essa separação garante que cada módulo pode evoluir de forma independente. Trocar o ChromaDB por Pinecone? Só muda `rag_service.py`. Adicionar um novo nó de classificação no fluxo? Só muda `graph_agent.py`. Expor um novo endpoint? Só muda `main.py`.
+O projeto adere rigorosamente à **Clean Architecture** e aos princípios **SOLID**:
+- **Presentation** — Não conhece a infraestrutura, apenas interfaces. Toda dependência dinâmica é resolvida via *Factory* ou injeção `Depends`.
+- **Use Cases** — Orquestra as regras. Não sabe se os dados vêm de uma API HTTP ou terminal.
+- **Domain** — Define os protocolos `RAGRepository` e `AgentService`. Não importa bibliotecas externas (nem mesmo FastAPI ou LangGraph).
+- **Infrastructure** — Implementações concretas. Trocar o ChromaDB por Pinecone? Só cria um novo arquivo aqui. Mudar o orquestrador para AgentScope? Ele já vive aqui lado a lado com o LangGraph.
+Essa separação blinda o negócio e garante que cada módulo possa evoluir de forma perfeitamente isolada.

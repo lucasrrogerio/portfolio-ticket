@@ -34,15 +34,12 @@ graph TD
 ```text
 Portfolio-Ticket/
 ├── app/
-│   ├── main.py                  # API FastAPI (Rotas HTTP e setup da app)
-│   ├── core/
-│   │   └── observability.py     # Inicialização de Rastreamento (OTel), Logs (Loki) e Métricas (Prometheus)
-│   ├── services/
-│   │   └── rag_service.py       # Busca Híbrida RAG (ChromaDB + BM25 Okapi)
-│   └── agents/
-│       ├── tools.py             # Ferramentas corporativas mockadas (AD, CRM, ITSM)
-│       ├── graph_agent.py       # Agente Autônomo Principal (LangGraph)
-│       └── agentscope_agent.py  # Agente Alternativo (AgentScope 2.0)
+│   ├── main.py                  # Bootstrapper (FastAPI App)
+│   ├── core/                    # Observabilidade e configurações globais
+│   ├── domain/                  # Interfaces abstratas (RAGRepository, AgentService)
+│   ├── use_cases/               # Orquestração de regras de negócio (Tickets e Documentos)
+│   ├── infrastructure/          # Adaptações externas (ChromaDB, LangGraph, AgentScope, Tools)
+│   └── presentation/            # Camada HTTP (Rotas REST FastAPI e Schemas Pydantic)
 ├── data/
 │   └── policies/                # Políticas de suporte indexadas pelo RAG
 ├── docs/                        # Documentação do projeto (Arquitetura, Observabilidade, Qualidade)

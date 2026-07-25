@@ -4,3 +4,6 @@ __pycache__/
 meu_banco_vetorial/
 .env
 .DS_Store
+graphify-out/
+.vscode/
+.pytest_cache/
